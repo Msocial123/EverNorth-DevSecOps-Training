@@ -1,0 +1,60 @@
+pipeline {
+    agent any
+
+    environment {
+        // Replace with your SonarQube server name (configured in Jenkins)
+        SONAR_SERVER = 'Sonar_Server' 
+        // Replace with the SonarQube project key for the repository
+        SONAR_PROJECT_KEY = 'maven-web-application'
+    }
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                echo 'Cloning the GitHub repository...'
+                git url: 'https://github.com/Msocial123/maven-web-application.git', branch: 'master'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                echo 'Starting SonarQube analysis...'
+                withSonarQubeEnv(env.SONAR_SERVER) {
+                    withCredentials([string(credentialsId: 'Sonar-Token', variable: 'SONAR_AUTH_TOKEN')]) {
+                        sh """
+                        sonar-scanner \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=${SONAR_HOST_URL} \
+                            -Dsonar.login=$SONAR_AUTH_TOKEN
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                echo 'Waiting for SonarQube quality gate result...'
+                script {
+                    def qg = waitForQualityGate()
+                    if (qg.status != 'OK') {
+                        error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up...'
+        }
+        success {
+            echo 'SonarQube analysis completed successfully!'
+        }
+        failure {
+            echo 'SonarQube analysis failed.'
+        }
+    }
+}
