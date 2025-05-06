@@ -1,0 +1,90 @@
+pipeline {
+    agent {
+        // Use a Docker agent with Maven and JDK 11
+        docker {
+            image 'maven:3.8.6-openjdk-11'
+            args '-v /root/.m2:/root/.m2'
+        }
+    }
+
+    tools {
+        // Use Jenkins-managed SonarScanner tool
+        sonarScanner 'Sonar-Scanner' // Defined in Jenkins Global Tool Config
+    }
+
+    parameters {
+        string(name: 'VERSION', defaultValue: '1.0.0', description: 'Application version')
+    }
+
+    environment {
+        SONARQUBE_SERVER = 'SonarQube-Server'
+        SONAR_TOKEN = credentials('Sonar_Token')
+        SONAR_PROJECT_KEY = 'Maven-Web-Application'
+        SONAR_PROJECT_NAME = 'Maven-Web-Application'
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                echo 'Cloning the GitHub repository...'
+                git url: 'https://github.com/Msocial123/maven-web-application.git', branch: 'master'
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                echo 'Building the application using Maven...'
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Code Quality Analysis') {
+            steps {
+                script {
+                    echo 'Starting SonarQube analysis...'
+                    withSonarQubeEnv("${env.SONARQUBE_SERVER}") {
+                        sh """
+                            sonar-scanner \
+                            -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
+                            -Dsonar.projectName=${env.SONAR_PROJECT_NAME} \
+                            -Dsonar.projectVersion=${params.VERSION} \
+                            -Dsonar.sources=. \
+                            -Dsonar.login=${env.SONAR_TOKEN}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master') {
+                        def qualityGate = waitForQualityGate()
+                        if (qualityGate.status != 'OK') {
+                            error "sonarQube Quality Gate failed! Code quality is not satisfactory."
+                        } else {
+                            echo "Quality Gate passed."
+                        }
+                    } else {
+                        echo "Skipping quality gate check on non-main branches."
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Build succeeded!"
+            archiveArtifacts artifacts: 'target/*.war', fingerprint: true
+        }
+        failure {
+            echo "Build failed. Please check logs."
+            // Optional: Notify team via email or Slack
+        }
+        always {
+            echo "🔚 Pipeline execution completed."
+        }
+    }
+}
