@@ -42,6 +42,11 @@ pipeline {
                     CRITICAL_COUNT=\$(grep -c 'CRITICAL' trivy-scan.txt || true)
 
                     echo "Found \$HIGH_COUNT HIGH and \$CRITICAL_COUNT Critical vulnerabilities."
+
+                    if [ "\$HIGH_COUNT" -gt 0 ]; then
+                        echo "❌ HIGH vulnerabilities detected. Failing the pipeline..."
+                        exit 1
+                    fi
                 """
                 archiveArtifacts artifacts: 'trivy-scan.txt', onlyIfSuccessful: true
             }
@@ -54,11 +59,11 @@ pipeline {
                     sh '''
                         snyk auth ${SNYK_TOKEN}
 
-                        # Scan image and allow pipeline to continue even if issues found
-                        snyk test --docker ${DOCKER_IMAGE} --severity-threshold=high || true
+                        echo "🔍 Running Snyk test for HIGH severity or above..."
+                        snyk test --docker ${DOCKER_IMAGE} --severity-threshold=high
 
-                        # Optional: Send to Snyk dashboard
-                        snyk monitor --docker ${DOCKER_IMAGE} || true
+                        echo "📡 Sending Docker image report to Snyk dashboard..."
+                        snyk monitor --docker ${DOCKER_IMAGE}
                     '''
                 }
             }
