@@ -1,0 +1,72 @@
+
+pipeline {
+    agent any
+
+    environment {
+        SNYK_TOKEN = credentials('snyk-api-token')
+        AWS_REGION = 'us-east-1'
+        ECR_IMAGE = '123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp:latest'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Secrets Detection') {
+            steps {
+                sh 'gitleaks detect --source=. --report-path=gitleaks-report.json || true'
+            }
+        }
+
+        stage('IaC Compliance - Terraform & CloudFormation') {
+            steps {
+                sh 'checkov -d . --output json > checkov-report.json'
+                sh 'tfsec . --format json --out tfsec-report.json || true'
+            }
+        }
+
+        stage('Dependency Compliance') {
+            steps {
+                sh 'snyk test --all-projects --json > snyk-report.json'
+            }
+        }
+
+        stage('ECR Container Image Scan') {
+            steps {
+                script {
+                    sh 'aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_IMAGE'
+                    sh "docker pull $ECR_IMAGE"
+                    sh "trivy image $ECR_IMAGE --format json --output trivy-report.json"
+                }
+            }
+        }
+
+        stage('AWS Config / NIST Compliance (optional)') {
+            steps {
+                sh 'inspec exec . --reporter cli json:inspec-report.json || true'
+            }
+        }
+
+        stage('Archive & Upload Reports to S3') {
+            steps {
+                script {
+                    sh '''
+                        mkdir -p compliance_reports
+                        mv *.json compliance_reports/
+                        aws s3 cp compliance_reports/ s3://my-compliance-bucket/reports/ --recursive
+                    '''
+                }
+                archiveArtifacts artifacts: 'compliance_reports/*.json', allowEmptyArchive: true
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Compliance scanning and report storage completed.'
+        }
+    }
+}
